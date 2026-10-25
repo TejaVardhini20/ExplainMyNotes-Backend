@@ -1,147 +1,117 @@
 package com.example.demo.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-
 import org.springframework.stereotype.Service;
 
 @Service
 public class OpenAIService {
 
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
 
-    public OpenAIService() {
+    public OpenAIService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
     }
 
     public String analyzeNotes(String notes) throws Exception {
-
         if (notes == null || notes.trim().isEmpty()) {
             throw new IllegalArgumentException("Notes cannot be empty.");
         }
 
         String sourceNotes = notes.trim();
-
-if (sourceNotes.length() > 20000) {
-    throw new IllegalArgumentException(
-            "This PDF contains too much text for one analysis. "
-                    + "Please split it into smaller sections and upload them separately."
-    );
-}
+        if (sourceNotes.length() > 4000) {
+            sourceNotes = sourceNotes.substring(0, 4000);
+        }
 
         String prompt = """
-                You are ExplainMyNotes, an accurate study assistant.
-
-                Return ONLY valid JSON with these keys:
+                You are ExplainMyNotes, a study assistant.
+                Return only valid JSON with these keys:
                 simpleExplanation, summary, keyPoints, flashcards, quiz.
-
-                Required structure:
+                Use this structure:
                 {
                   "simpleExplanation": "Simple explanation",
-                  "summary": "Meaningful summary",
-                  "keyPoints": [
-                    "Point 1",
-                    "Point 2",
-                    "Point 3",
-                    "Point 4",
-                    "Point 5"
-                  ],
+                  "summary": "Short summary",
+                  "keyPoints": ["Point 1", "Point 2", "Point 3"],
                   "flashcards": [
-                    {
-                      "question": "Question",
-                      "answer": "Answer"
-                    }
+                    {"question": "Question", "answer": "Answer"}
                   ],
                   "quiz": [
                     {
                       "question": "Question",
-                      "options": [
-                        "Option 1",
-                        "Option 2",
-                        "Option 3",
-                        "Option 4"
-                      ],
+                      "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
                       "answer": "Exact correct option"
                     }
                   ]
                 }
-
-                
-ACCURACY RULES:
-- Treat STUDENT NOTES as the only source of factual information.
-- Use no outside knowledge, assumptions, or invented details.
-- Before writing any fact, check that it is supported by the supplied notes.
-- Preserve names, definitions, dates, numbers, technical terms, and course codes exactly as supported by the notes.
-- Do not create relationships between names, subjects, dates, or codes unless the notes explicitly support them.
-- If the notes do not contain enough evidence for a question, do not generate that question.
-- Every key point must communicate a fact supported by the notes.
-- Every flashcard answer must directly answer its question using information supported by the notes.
-- Every quiz question must have exactly one clearly correct answer supported by the notes.
-- Every quiz answer must exactly match one of its four options.
-- All four quiz options must be different.
-- Incorrect options may be plausible alternatives, but must not also be correct according to the notes.
-- Do not use an answer merely because it sounds reasonable.
-- If the notes are incomplete or unclear, state the limitation instead of guessing.
-
-
-                CONTENT RULES:
-                - Use simple English suitable for a college student.
-                - Preserve technical terms and course names.
-                - Write words with proper spacing.
-                - Write "What is", never "Whatis".
-                - Write "second semester", never "secondsemester".
-                - Write "analysis in", never "analysisin".
-                - Provide up to five key points.
-                - Provide up to five flashcards.
-                - Provide up to five multiple-choice questions.
-                - Avoid making quiz questions identical to flashcards.
-                - Make the explanation and summary useful and meaningful.
-                - Return JSON only, without Markdown or extra text.
-
+                Rules:
+                - Use only facts from the student notes.
+                - Use simple English and concise explanations.
+                - Provide up to three key points, flashcards, and quiz questions.
+                - Every quiz must have four distinct options.
+                - Each answer must exactly match one option.
+                - Return JSON only, without Markdown.
                 STUDENT NOTES:
                 %s
                 """.formatted(sourceNotes);
 
         String requestBody = """
                 {
-                  "model": "llama3.2:3b",
-                  "prompt": "%s",
+                  "model": "glm-5.2",
+                  "messages": [
+                    {
+                      "role": "user",
+                      "content": "%s"
+                    }
+                  ],
+                  "temperature": 0.1,
+                  "max_tokens": 1200,
                   "stream": false,
-                  "format": "json",
-                  "options": {
-                    "temperature": 0.1,
-                    "num_predict": 2500
-                  }
+                  "response_format": {"type": "json_object"}
                 }
                 """.formatted(escapeJson(prompt));
 
+        String apiKey = System.getenv("INFERENCE_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException("INFERENCE_API_KEY is not configured.");
+        }
+
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:11434/api/generate"))
+                .uri(URI.create("https://api.inference.net/v1/chat/completions"))
                 .timeout(Duration.ofMinutes(3))
+                .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
         HttpResponse<String> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofString()
-        );
+                request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new RuntimeException(
-                    "Ollama request failed with status "
-                            + response.statusCode()
-                            + ": "
-                            + response.body()
-            );
+                    "Hosted AI request failed with status "
+                    + response.statusCode() + ": " + response.body());
         }
 
-        return response.body();
+        JsonNode result = objectMapper.readTree(response.body());
+        JsonNode content = result.path("choices").path(0)
+                .path("message").path("content");
+
+        if (!content.isTextual() || content.asText().isBlank()) {
+            throw new RuntimeException("Hosted AI returned an empty response.");
+        }
+
+        String analysis = content.asText();
+        objectMapper.readTree(analysis);
+        return analysis;
     }
 
     private String escapeJson(String text) {
@@ -154,4 +124,4 @@ ACCURACY RULES:
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
     }
-  }
+}
