@@ -1,3 +1,4 @@
+
 package com.example.demo.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -65,7 +66,7 @@ public class OpenAIService {
 
         String requestBody = """
                 {
-                  "model": "glm-5.2",
+                  "model": "openai/gpt-oss-20b",
                   "messages": [
                     {
                       "role": "user",
@@ -81,11 +82,13 @@ public class OpenAIService {
 
         String apiKey = System.getenv("INFERENCE_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("INFERENCE_API_KEY is not configured.");
+            throw new IllegalStateException(
+                    "INFERENCE_API_KEY is not configured.");
         }
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.inference.net/v1/chat/completions"))
+                .uri(URI.create(
+                        "https://api.groq.com/openai/v1/chat/completions"))
                 .timeout(Duration.ofMinutes(3))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
@@ -95,7 +98,8 @@ public class OpenAIService {
         HttpResponse<String> response = httpClient.send(
                 request, HttpResponse.BodyHandlers.ofString());
 
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        if (response.statusCode() < 200
+                || response.statusCode() >= 300) {
             throw new RuntimeException(
                     "Hosted AI request failed with status "
                     + response.statusCode() + ": " + response.body());
@@ -106,7 +110,8 @@ public class OpenAIService {
                 .path("message").path("content");
 
         if (!content.isTextual() || content.asText().isBlank()) {
-            throw new RuntimeException("Hosted AI returned an empty response.");
+            throw new RuntimeException(
+                    "Hosted AI returned an empty response.");
         }
 
         String analysis = content.asText();
