@@ -2,12 +2,9 @@
 package com.example.demo.service;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -38,101 +35,93 @@ public class AnalysisService {
                 .orElseThrow(() -> new RuntimeException("Note not found"));
 
         try {
-            String ollamaResponse =
-                    openAIService.analyzeNotes(note.getContent());
+            String aiResponse = openAIService.analyzeNotes(note.getContent());
 
-            JsonNode outerJson = objectMapper.readTree(ollamaResponse);
-            String aiJson = outerJson.path("response").asText();
-            JsonNode aiData = objectMapper.readTree(aiJson);
+            JsonNode aiData = objectMapper.readTree(aiResponse);
+
+            if (aiData.has("choices")) {
+                aiData = objectMapper.readTree(
+                        aiData.path("choices")
+                                .path(0)
+                                .path("message")
+                                .path("content")
+                                .asText());
+            } else if (aiData.has("response")) {
+                aiData = objectMapper.readTree(
+                        aiData.path("response").asText());
+            }
 
             Map<String, Object> result = new LinkedHashMap<>();
 
             result.put("noteId", note.getId());
             result.put("fileName", note.getFileName());
-            result.put("simpleExplanation",
-                    cleanText(aiData.path("simpleExplanation").asText("")));
-            result.put("summary",
-                    cleanText(aiData.path("summary").asText("")));
+
+            String explanation = aiData.path("simpleExplanation").asText("");
+            String summary = aiData.path("summary").asText("");
+
+            if (explanation.isBlank() && summary.isBlank()) {
+                throw new RuntimeException(
+                        "AI returned empty study material. Check the AI response and note content.");
+            }
+
+            result.put("simpleExplanation", explanation);
+            result.put("summary", summary);
 
             List<String> keyPoints = new ArrayList<>();
-            JsonNode keyPointsNode = aiData.path("keyPoints");
+            JsonNode pointsNode = aiData.path("keyPoints");
 
-            if (keyPointsNode.isArray()) {
-                for (JsonNode item : keyPointsNode) {
-                    String point = cleanText(item.asText());
-                    if (!point.isEmpty()) {
-                        keyPoints.add(point);
+            if (pointsNode.isArray()) {
+                for (JsonNode item : pointsNode) {
+                    if (!item.asText().isBlank()) {
+                        keyPoints.add(item.asText().trim());
                     }
                 }
             }
 
             result.put("keyPoints", keyPoints);
 
-            List<Map<String, Object>> quiz = new ArrayList<>();
-            JsonNode quizNode = aiData.path("quiz");
+            List<Map<String, String>> flashcards = new ArrayList<>();
+            JsonNode cardsNode = aiData.path("flashcards");
 
-            if (quizNode.isArray()) {
-                for (JsonNode questionNode : quizNode) {
+            if (cardsNode.isArray()) {
+                for (JsonNode item : cardsNode) {
+                    String question = item.path("question").asText("");
+                    String answer = item.path("answer").asText("");
 
-                    String question = cleanText(
-                            questionNode.path("question").asText(""));
-
-                    List<String> options = new ArrayList<>();
-                    Set<String> usedOptions = new HashSet<>();
-                    JsonNode optionsNode = questionNode.path("options");
-
-                    if (optionsNode.isArray()) {
-                        for (JsonNode option : optionsNode) {
-                            String cleanedOption =
-                                    cleanText(option.asText());
-
-                            if (!cleanedOption.isEmpty()
-                                    && usedOptions.add(
-                                            cleanedOption.toLowerCase(Locale.ROOT))) {
-                                options.add(cleanedOption);
-                            }
-                        }
-                    }
-
-                    String answer = cleanText(
-                            questionNode.path("answer").asText(""));
-
-                    String matchedAnswer = "";
-
-                    for (String option : options) {
-                        if (option.equalsIgnoreCase(answer)) {
-                            matchedAnswer = option;
-                            break;
-                        }
-                    }
-
-                    if (!question.isEmpty()
-                            && options.size() == 4
-                            && !matchedAnswer.isEmpty()) {
-
-                        Map<String, Object> cleanedQuestion =
-                                new LinkedHashMap<>();
-
-                        cleanedQuestion.put("question", question);
-                        cleanedQuestion.put("options", options);
-                        cleanedQuestion.put("answer", matchedAnswer);
-
-                        quiz.add(cleanedQuestion);
+                    if (!question.isBlank() && !answer.isBlank()) {
+                        Map<String, String> card = new LinkedHashMap<>();
+                        card.put("question", question);
+                        card.put("answer", answer);
+                        flashcards.add(card);
                     }
                 }
             }
 
-            List<Map<String, String>> flashcards = new ArrayList<>();
+            List<Map<String, Object>> quiz = new ArrayList<>();
+            JsonNode quizNode = aiData.path("quiz");
 
-            for (Map<String, Object> quizQuestion : quiz) {
-                Map<String, String> card = new LinkedHashMap<>();
+            if (quizNode.isArray()) {
+                for (JsonNode item : quizNode) {
+                    String question = item.path("question").asText("");
+                    String answer = item.path("answer").asText("");
+                    List<String> options = new ArrayList<>();
 
-                card.put("question",
-                        String.valueOf(quizQuestion.get("question")));
-                card.put("answer",
-                        String.valueOf(quizQuestion.get("answer")));
+                    JsonNode optionsNode = item.path("options");
+                    if (optionsNode.isArray()) {
+                        for (JsonNode option : optionsNode) {
+                            options.add(option.asText());
+                        }
+                    }
 
-                flashcards.add(card);
+                    if (!question.isBlank() && !answer.isBlank()
+                            && options.size() >= 2) {
+                        Map<String, Object> q = new LinkedHashMap<>();
+                        q.put("question", question);
+                        q.put("options", options);
+                        q.put("answer", answer);
+                        quiz.add(q);
+                    }
+                }
             }
 
             result.put("flashcards", flashcards);
@@ -144,19 +133,5 @@ public class AnalysisService {
             throw new RuntimeException(
                     "AI analysis failed: " + e.getMessage(), e);
         }
-    }
-
-    private String cleanText(String text) {
-        if (text == null) {
-            return "";
-        }
-
-        return text
-                .replaceAll("([a-z])([A-Z])", "$1 $2")
-                .replaceAll("(?i)\\bsecondsemester\\b", "second semester")
-                .replaceAll("(?i)\\bwhatis\\b", "What is")
-                .replaceAll("(?i)\\banalysisin\\b", "analysis in")
-                .replaceAll("\\s+", " ")
-                .trim();
     }
 }
