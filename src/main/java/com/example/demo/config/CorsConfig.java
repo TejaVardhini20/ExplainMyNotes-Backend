@@ -1,4 +1,4 @@
-
+```java
 package com.example.demo.config;
 
 import org.springframework.context.annotation.Bean;
@@ -17,7 +17,8 @@ public class CorsConfig {
                 registry.addMapping("/**")
                         .allowedOrigins(
                                 "http://localhost:5173",
-                                "http://127.0.0.1:5173"
+                                "http://127.0.0.1:5173",
+                                "https://explain-my-notes-frontend-y9l8.vercel.app"
                         )
                         .allowedMethods(
                                 "GET",
@@ -32,3 +33,4 @@ public class CorsConfig {
         };
     }
 }
+```

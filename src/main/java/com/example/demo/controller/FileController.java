@@ -37,6 +37,9 @@ public String uploadFile(@RequestPart("file") MultipartFile file) {
             PDFTextStripper stripper = new PDFTextStripper();
 
             String text = stripper.getText(document);
+            System.out.println("PDF FILE NAME: " + file.getOriginalFilename());
+            System.out.println("EXTRACTED TEXT: " + text);
+            System.out.println("EXTRACTED TEXT LENGTH: " + text.length());
 
             document.close();
 
