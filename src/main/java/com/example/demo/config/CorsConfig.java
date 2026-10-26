@@ -1,4 +1,3 @@
-```java
 package com.example.demo.config;
 
 import org.springframework.context.annotation.Bean;
@@ -20,17 +19,10 @@ public class CorsConfig {
                                 "http://127.0.0.1:5173",
                                 "https://explain-my-notes-frontend-y9l8.vercel.app"
                         )
-                        .allowedMethods(
-                                "GET",
-                                "POST",
-                                "PUT",
-                                "DELETE",
-                                "OPTIONS"
-                        )
+                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .maxAge(3600);
             }
         };
     }
 }
-```
